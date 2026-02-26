@@ -1,16 +1,15 @@
-# 本地视频换脸（Face Swap）工具
+# 照片生成随机跳舞视频（本地版）
 
-这是一个**可在本地离线运行**的基础视频换脸项目脚手架，目标是：
+这是一个**本地离线运行**的轻量工具：
 
-- 输入：`source.jpg`（要替换上的人脸）和 `target.mp4`（待处理视频）
-- 输出：`output.mp4`（换脸后视频）
-- 默认不上传任何数据到云端
+- 输入：一张照片（如 `me.jpg`）
+- 输出：一段“随机跳舞”风格的短视频（`dance.mp4`）
 
-> ⚠️ 请仅在合法、合规和获得授权的场景下使用（如影视后期、匿名化、研究、本人素材处理）。
+它通过给前景人物添加随机位移、旋转、节奏缩放来模拟舞动效果，无需云端服务。
 
 ## 1. 环境准备
 
-建议 Python 3.10。
+建议 Python 3.10+。
 
 ```bash
 python -m venv .venv
@@ -19,38 +18,41 @@ pip install -U pip
 pip install -r requirements.txt
 ```
 
-## 2. 下载模型
-
-本项目使用 `insightface` 的 `inswapper_128.onnx` 模型。
-
-1. 安装依赖后，首次运行会自动下载部分人脸分析模型。
-2. `inswapper_128.onnx` 通常需手动准备，放到：
-
-```text
-./models/inswapper_128.onnx
-```
-
-## 3. 运行示例
+## 2. 快速开始
 
 ```bash
 python app.py \
-  --source source.jpg \
-  --target target.mp4 \
-  --output output.mp4 \
-  --swap-model ./models/inswapper_128.onnx
+  --photo me.jpg \
+  --output out/dance.mp4 \
+  --duration 8 \
+  --fps 30 \
+  --size 720x1280 \
+  --style random
 ```
 
-## 4. 常见问题
+## 3. 参数说明
 
-- **速度慢**：
-  - 优先使用 GPU 版本 `onnxruntime-gpu`（需匹配 CUDA）。
-  - 降低输入视频分辨率或帧率。
-- **有些帧没换脸**：
-  - 增大检测分辨率：`--det-size 640` 或更高。
-  - 确保源图是清晰正脸。
-- **输出音频丢失**：
-  - 当前脚本聚焦视频帧处理，不处理音轨。可后处理用 ffmpeg 合并音轨。
+- `--photo`：输入照片路径（必填）
+- `--output`：输出视频路径（必填）
+- `--duration`：时长（秒），默认 `8`
+- `--fps`：帧率，默认 `30`
+- `--size`：输出分辨率，默认 `720x1280`
+- `--style`：舞蹈风格，可选：
+  - `hiphop`：幅度较大、动感更明显
+  - `swing`：摆动感更强
+  - `robot`：偏机械卡点
+  - `random`：每次随机一种风格
+- `--seed`：随机种子（可选），用于复现同一效果
+
+## 4. 进阶建议
+
+- 想让人物更突出：使用背景干净、主体居中的照片。
+- 想做“音乐视频”：可用 ffmpeg 后期加音轨，例如：
+
+```bash
+ffmpeg -i out/dance.mp4 -i bgm.mp3 -shortest -c:v copy -c:a aac out/dance_with_music.mp4
+```
 
 ## 5. 免责声明
 
-使用者需对数据与产出负责，严禁用于诈骗、伪造身份、侵犯肖像权或其他违法用途。
+请仅在合法、合规、获得授权的场景中使用。
