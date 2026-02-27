@@ -1,178 +1,139 @@
 #!/usr/bin/env python3
-"""照片生成随机跳舞视频工具.
+"""小红书一键排版工具.
 
-示例:
-python app.py --photo input.jpg --output dance.mp4 --duration 8 --fps 30 --style random
+功能:
+- 自动清洗文本空白
+- 自动分段和加小标题
+- 一键添加 emoji 风格标签
+- 自动生成结尾互动引导与话题标签
 """
 
 from __future__ import annotations
 
 import argparse
-import math
-import random
+import re
 from pathlib import Path
 
-import cv2
-import numpy as np
+EMOJI_STYLES: dict[str, list[str]] = {
+    "none": ["", "", ""],
+    "soft": ["✨", "🌿", "📝"],
+    "cute": ["💖", "🐻", "🎀"],
+    "clean": ["✅", "📌", "🧠"],
+}
 
-
-DANCE_STYLES = ("hiphop", "swing", "robot", "random")
+SECTION_TITLES = [
+    "先说重点",
+    "展开聊聊",
+    "实操建议",
+]
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="从单张照片合成随机跳舞视频")
-    parser.add_argument("--photo", required=True, type=Path, help="输入照片路径")
-    parser.add_argument("--output", required=True, type=Path, help="输出视频路径 (mp4)")
-    parser.add_argument("--duration", type=float, default=8.0, help="视频时长（秒）")
-    parser.add_argument("--fps", type=int, default=30, help="帧率")
-    parser.add_argument("--size", default="720x1280", help="输出分辨率，例如 720x1280")
-    parser.add_argument("--style", choices=DANCE_STYLES, default="random", help="舞蹈风格")
-    parser.add_argument("--seed", type=int, default=None, help="随机种子，便于复现")
+    parser = argparse.ArgumentParser(description="小红书文案一键排版")
+    parser.add_argument("--text", help="直接传入文案内容")
+    parser.add_argument("--input", type=Path, help="从文件读取文案")
+    parser.add_argument("--output", type=Path, help="输出到文件，不填则打印到终端")
+    parser.add_argument("--title", default="", help="可选标题，会放在文案顶部")
+    parser.add_argument("--emoji-style", choices=tuple(EMOJI_STYLES), default="soft", help="emoji 风格")
+    parser.add_argument("--hashtags", default="", help="额外话题标签，空格分隔，如: 护肤 通勤穿搭")
+    parser.add_argument("--cta", default="你还想看哪类内容？欢迎评论区告诉我～", help="结尾互动引导")
     return parser.parse_args()
 
 
-def parse_size(size_text: str) -> tuple[int, int]:
-    try:
-        w, h = size_text.lower().split("x")
-        width, height = int(w), int(h)
-    except Exception as exc:  # noqa: BLE001
-        raise ValueError(f"无效分辨率格式: {size_text}, 应为 720x1280") from exc
-    if width <= 0 or height <= 0:
-        raise ValueError("分辨率必须为正整数")
-    return width, height
+def normalize_text(text: str) -> str:
+    text = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    text = re.sub(r"[ \t]+", " ", text)
+    lines = [line.strip() for line in text.split("\n")]
+    lines = [line for line in lines if line]
+    return "\n".join(lines)
 
 
-def build_background(src_img: np.ndarray, width: int, height: int) -> np.ndarray:
-    """创建背景层：基于原图拉伸 + 高斯模糊。"""
-    bg = cv2.resize(src_img, (width, height), interpolation=cv2.INTER_CUBIC)
-    bg = cv2.GaussianBlur(bg, (0, 0), sigmaX=20, sigmaY=20)
-    return bg
+def split_sentences(text: str) -> list[str]:
+    text = re.sub(r"([。！？!?；;])", r"\1\n", text)
+    parts = [p.strip() for p in text.split("\n") if p.strip()]
+    return parts
 
 
-def fit_foreground(src_img: np.ndarray, width: int, height: int) -> np.ndarray:
-    """将原图按比例缩放，确保主体完整显示。"""
-    ih, iw = src_img.shape[:2]
-    scale = min(width / iw, height / ih) * 0.8
-    nw, nh = int(iw * scale), int(ih * scale)
-    return cv2.resize(src_img, (nw, nh), interpolation=cv2.INTER_AREA)
+def split_to_sections(items: list[str], section_count: int = 3) -> list[list[str]]:
+    if not items:
+        return [[] for _ in range(section_count)]
+
+    chunk = (len(items) + section_count - 1) // section_count
+    sections: list[list[str]] = []
+    for i in range(section_count):
+        sections.append(items[i * chunk : (i + 1) * chunk])
+    while len(sections) < section_count:
+        sections.append([])
+    return sections
 
 
-def style_params(style: str, rng: random.Random) -> dict[str, float]:
-    if style == "random":
-        style = rng.choice(("hiphop", "swing", "robot"))
-
-    if style == "hiphop":
-        return {"sx": 28, "sy": 20, "rot": 12, "pulse": 0.08, "freq": 1.4}
-    if style == "swing":
-        return {"sx": 20, "sy": 36, "rot": 8, "pulse": 0.06, "freq": 1.0}
-    if style == "robot":
-        return {"sx": 16, "sy": 16, "rot": 5, "pulse": 0.03, "freq": 2.1}
-
-    raise ValueError(f"未知舞蹈风格: {style}")
+def normalize_hashtags(raw_hashtags: str) -> list[str]:
+    if not raw_hashtags.strip():
+        return []
+    tags = []
+    for tag in raw_hashtags.split():
+        token = tag.strip().lstrip("#")
+        if token:
+            tags.append(f"#{token}")
+    return tags
 
 
-def motion_at_t(t: float, params: dict[str, float], rng: random.Random) -> tuple[float, float, float, float]:
-    """返回位移 dx/dy、旋转角度、缩放比例。"""
-    freq = params["freq"]
+def format_post(
+    text: str,
+    title: str,
+    emoji_style: str,
+    hashtags: str,
+    cta: str,
+) -> str:
+    cleaned = normalize_text(text)
+    sentence_items = split_sentences(cleaned)
+    sections = split_to_sections(sentence_items)
+    emojis = EMOJI_STYLES[emoji_style]
 
-    if freq > 2.0:
-        step = 0.12
-        t = round(t / step) * step
+    blocks: list[str] = []
 
-    jitter = rng.uniform(-0.6, 0.6)
-    dx = params["sx"] * math.sin(2 * math.pi * freq * t + jitter)
-    dy = params["sy"] * math.cos(2 * math.pi * (freq * 0.6) * t + jitter)
-    rot = params["rot"] * math.sin(2 * math.pi * (freq * 0.7) * t)
-    scale = 1.0 + params["pulse"] * math.sin(2 * math.pi * (freq * 0.8) * t)
-    return dx, dy, rot, scale
+    if title.strip():
+        blocks.append(f"{emojis[0]} {title.strip()} {emojis[0]}".strip())
+
+    for i, section in enumerate(sections):
+        if not section:
+            continue
+        head = f"{emojis[i % len(emojis)]} {SECTION_TITLES[i]}"
+        body = "\n".join(f"- {line}" for line in section)
+        blocks.append(f"{head}\n{body}")
+
+    if cta.strip():
+        blocks.append(f"\n{emojis[1]} {cta.strip()}")
+
+    default_tags = ["#小红书文案", "#一键排版", "#内容创作"]
+    all_tags = default_tags + normalize_hashtags(hashtags)
+    blocks.append(" ".join(all_tags))
+
+    return "\n\n".join(blocks).strip() + "\n"
 
 
-def render_frame(bg: np.ndarray, fg: np.ndarray, t: float, params: dict[str, float], rng: random.Random) -> np.ndarray:
-    height, width = bg.shape[:2]
-    fh, fw = fg.shape[:2]
-
-    dx, dy, rot, scale = motion_at_t(t, params, rng)
-    sw, sh = max(16, int(fw * scale)), max(16, int(fh * scale))
-    scaled = cv2.resize(fg, (sw, sh), interpolation=cv2.INTER_LINEAR)
-
-    mat = cv2.getRotationMatrix2D((sw / 2, sh / 2), rot, 1.0)
-    rotated = cv2.warpAffine(
-        scaled,
-        mat,
-        (sw, sh),
-        flags=cv2.INTER_LINEAR,
-        borderMode=cv2.BORDER_REFLECT,
-    )
-
-    cx = width // 2 + int(dx)
-    cy = height // 2 + int(dy)
-    x0 = cx - sw // 2
-    y0 = cy - sh // 2
-    x1 = x0 + sw
-    y1 = y0 + sh
-
-    frame = bg.copy()
-
-    rx0 = max(0, x0)
-    ry0 = max(0, y0)
-    rx1 = min(width, x1)
-    ry1 = min(height, y1)
-    if rx0 >= rx1 or ry0 >= ry1:
-        return frame
-
-    sx0 = rx0 - x0
-    sy0 = ry0 - y0
-    sx1 = sx0 + (rx1 - rx0)
-    sy1 = sy0 + (ry1 - ry0)
-
-    frame[ry0:ry1, rx0:rx1] = rotated[sy0:sy1, sx0:sx1]
-
-    return frame
+def read_source_text(args: argparse.Namespace) -> str:
+    if args.text:
+        return args.text
+    if args.input:
+        if not args.input.exists():
+            raise FileNotFoundError(f"输入文件不存在: {args.input}")
+        return args.input.read_text(encoding="utf-8")
+    raise ValueError("请提供 --text 或 --input")
 
 
 def main() -> None:
     args = parse_args()
+    source = read_source_text(args)
+    result = format_post(source, args.title, args.emoji_style, args.hashtags, args.cta)
 
-    if args.seed is None:
-        args.seed = random.randint(1, 10**9)
-    rng = random.Random(args.seed)
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(result, encoding="utf-8")
+        print(f"排版完成，已输出到: {args.output}")
+        return
 
-    if not args.photo.exists():
-        raise FileNotFoundError(f"输入照片不存在: {args.photo}")
-
-    width, height = parse_size(args.size)
-    total_frames = int(args.duration * args.fps)
-    if total_frames <= 0:
-        raise ValueError("duration * fps 必须大于 0")
-
-    src = cv2.imread(str(args.photo))
-    if src is None:
-        raise RuntimeError("无法读取输入照片，请检查格式")
-
-    bg = build_background(src, width, height)
-    fg = fit_foreground(src, width, height)
-    params = style_params(args.style, rng)
-
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    writer = cv2.VideoWriter(
-        str(args.output),
-        cv2.VideoWriter_fourcc(*"mp4v"),
-        float(args.fps),
-        (width, height),
-    )
-    if not writer.isOpened():
-        raise RuntimeError(f"无法写出视频到: {args.output}")
-
-    print(f"开始生成，随机种子: {args.seed}")
-    for i in range(total_frames):
-        t = i / args.fps
-        frame = render_frame(bg, fg, t, params, rng)
-        writer.write(frame)
-        if i % args.fps == 0:
-            print(f"进度: {i}/{total_frames} 帧")
-
-    writer.release()
-    print(f"完成！输出文件: {args.output}")
+    print(result, end="")
 
 
 if __name__ == "__main__":
