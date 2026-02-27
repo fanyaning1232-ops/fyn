@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>小红书一键排版工具</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="hero">
+        <h1>小红书一键排版工具</h1>
+        <p>粘贴草稿，一键生成适合发布的分段文案。</p>
+      </header>
+
+      <section class="panel form-panel">
+        <div class="field">
+          <label for="title">标题（可选）</label>
+          <input id="title" type="text" placeholder="例如：7天改善晨起状态的小习惯" />
+        </div>
+
+        <div class="field">
+          <label for="rawText">原始文案</label>
+          <textarea id="rawText" rows="8" placeholder="在这里粘贴你的原始草稿..."></textarea>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label for="emojiStyle">Emoji 风格</label>
+            <select id="emojiStyle">
+              <option value="soft">soft（温柔）</option>
+              <option value="cute">cute（可爱）</option>
+              <option value="clean">clean（简洁）</option>
+              <option value="none">none（无 emoji）</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="hashtags">追加标签（空格分隔）</label>
+            <input id="hashtags" type="text" placeholder="护肤 早起习惯" />
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="cta">结尾互动引导</label>
+          <input
+            id="cta"
+            type="text"
+            value="你还想看哪类内容？欢迎评论区告诉我～"
+          />
+        </div>
+
+        <div class="actions">
+          <button id="formatBtn" type="button">一键排版</button>
+          <button id="copyBtn" type="button" class="secondary">复制结果</button>
+          <button id="clearBtn" type="button" class="secondary">清空</button>
+        </div>
+      </section>
+
+      <section class="panel output-panel">
+        <div class="output-head">
+          <h2>排版结果</h2>
+          <span id="status" class="status"></span>
+        </div>
+        <textarea id="result" rows="14" readonly placeholder="点击“一键排版”后在这里显示结果"></textarea>
+      </section>
+    </main>
+
+    <script src="script.js"></script>
+  </body>
+</html>
